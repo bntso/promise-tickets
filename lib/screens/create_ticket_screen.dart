@@ -3,8 +3,10 @@ import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 
 import '../identity/identity.dart';
+import '../models/ticket.dart';
 import '../people/contact.dart';
 import '../people/contact_store.dart';
+import '../server/server_service.dart';
 import '../state/ticket_store.dart';
 import 'gift_qr_screen.dart';
 
@@ -66,9 +68,73 @@ class _CreateTicketScreenState extends State<CreateTicketScreen> {
       ))!;
     }
     if (!mounted) return;
+
+    // Directory contacts can receive the promise straight to their inbox.
+    final server = context.read<ServerService>();
+    if (contact != null && contact.canReceiveRemote && server.isRegistered) {
+      final sendNow = await _chooseDelivery(contact);
+      if (!mounted) return;
+      if (sendNow == true) {
+        await _sendNow(ticket, contact);
+        return;
+      }
+      if (sendNow == null) return; // dismissed — stay on the form
+    }
+
     Navigator.of(context).pushReplacement(
       MaterialPageRoute<void>(builder: (_) => GiftQrScreen(ticket: ticket)),
     );
+  }
+
+  /// Server ("Send now") vs in-person ("Show QR") delivery.
+  Future<bool?> _chooseDelivery(Contact contact) {
+    return showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Gift to ${contact.name}'),
+        content: Text(
+          'Send it now to the inbox of @${contact.username}, or show a QR '
+          'code to hand it over in person?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Show QR'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Send now'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _sendNow(Ticket ticket, Contact contact) async {
+    final store = context.read<TicketStore>();
+    final server = context.read<ServerService>();
+    final identity = context.read<Identity>();
+    try {
+      await server.publishGift(
+        ticket,
+        identity,
+        toUid: contact.serverUid!,
+        toUsername: contact.username!,
+      );
+      await store.markServerStatus(ticket.id, ServerTicketStatus.offered);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Sent to @${contact.username}.')),
+      );
+      Navigator.of(context).pop();
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Could not send right now — try the QR code instead.'),
+        ),
+      );
+    }
   }
 
   /// Optional "Who is this for?" picker — skipping leaves the gift open to

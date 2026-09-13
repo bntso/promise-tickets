@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../models/ticket.dart';
 import '../people/contact_store.dart';
 import '../state/ticket_store.dart';
+import '../widgets/server_sections.dart';
 import '../widgets/ticket_card.dart';
 import 'create_ticket_screen.dart';
 import 'scan_screen.dart';
@@ -37,22 +38,29 @@ class WalletScreen extends StatelessWidget {
           ),
         ),
         body: Consumer2<TicketStore, ContactStore>(
-          builder: (context, store, contacts, _) => TabBarView(
+          builder: (context, store, contacts, _) => Column(
             children: [
-              _TicketList(
-                tickets: store.owedToMe,
-                contacts: contacts,
-                emptyMessage: 'No promises owed to you yet — scan one!',
-              ),
-              _TicketList(
-                tickets: store.iOwe,
-                contacts: contacts,
-                emptyMessage: 'You owe nothing — create a promise!',
-              ),
-              _TicketList(
-                tickets: store.history,
-                contacts: contacts,
-                emptyMessage: 'No past promises.',
+              const ServerSections(),
+              Expanded(
+                child: TabBarView(
+                  children: [
+                    _TicketList(
+                      tickets: store.owedToMe,
+                      contacts: contacts,
+                      emptyMessage: 'No promises owed to you yet — scan one!',
+                    ),
+                    _TicketList(
+                      tickets: store.iOwe,
+                      contacts: contacts,
+                      emptyMessage: 'You owe nothing — create a promise!',
+                    ),
+                    _TicketList(
+                      tickets: store.history,
+                      contacts: contacts,
+                      emptyMessage: 'No past promises.',
+                    ),
+                  ],
+                ),
               ),
             ],
           ),
@@ -95,6 +103,10 @@ class _TicketList extends StatelessWidget {
           ticket: ticket,
           counterpartyLabel: counterparty.label,
           verified: counterparty.verified,
+          onConfirmClaim: ticket.role == TicketRole.giver &&
+                  ticket.serverStatus == ServerTicketStatus.claimRequested
+              ? () => confirmTicketFulfillment(context, ticket)
+              : null,
           onTap: () => Navigator.of(context).push(
             MaterialPageRoute<void>(
               builder: (_) => TicketDetailScreen(ticketId: ticket.id),

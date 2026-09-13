@@ -92,17 +92,23 @@ Map<String, Object?> _giftSignedFields(Ticket ticket, String giverPubKey) {
   };
 }
 
-Future<String> encodeGiftV2(Ticket ticket, Identity identity) async {
+/// The signed PT2 gift payload as a plain JSON map — the form uploaded to
+/// the server (Firestore stores the decoded map, not the base64 string).
+Future<Map<String, Object?>> encodeGiftV2Map(
+  Ticket ticket,
+  Identity identity,
+) async {
   final signed = _giftSignedFields(ticket, identity.publicKeyHex);
   final signature = await identity.signHex(utf8.encode(canonicalJson(signed)));
-  return '$kPayloadVersionV2:GIFT:${_encode({...signed, 'signature': signature})}';
+  return {...signed, 'signature': signature};
 }
 
-Future<Ticket> decodeGiftV2(String raw) async {
-  if (!raw.startsWith('$kPayloadVersionV2:GIFT:')) {
-    throw const FormatException('This QR code is not a Promise Ticket gift.');
-  }
-  final map = _decode(raw.substring(9));
+Future<String> encodeGiftV2(Ticket ticket, Identity identity) async =>
+    '$kPayloadVersionV2:GIFT:${_encode(await encodeGiftV2Map(ticket, identity))}';
+
+/// Verifies and decodes a PT2 gift already in map form (e.g. read back from
+/// the server). Same verification as [decodeGiftV2].
+Future<Ticket> decodeGiftV2Map(Map<dynamic, dynamic> map) async {
   final signature = map['signature'];
   final giverPubKey = map['giverPubKey'];
   if (signature is! String || !_isPubKey(giverPubKey)) {
@@ -124,6 +130,13 @@ Future<Ticket> decodeGiftV2(String raw) async {
     throw const FormatException('This ticket has expired.');
   }
   return ticket;
+}
+
+Future<Ticket> decodeGiftV2(String raw) async {
+  if (!raw.startsWith('$kPayloadVersionV2:GIFT:')) {
+    throw const FormatException('This QR code is not a Promise Ticket gift.');
+  }
+  return decodeGiftV2Map(_decode(raw.substring(9)));
 }
 
 /// Decodes either a legacy PT1 gift (unsigned, shown as unverified) or a
@@ -233,6 +246,57 @@ RedeemPayload _redeemFromMap(Map<String, dynamic> map) {
     holderName: holderName is String && holderName.isNotEmpty
         ? holderName
         : 'Someone',
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Fulfillment receipts (server flow) — giver-signed proof of fulfillment
+// ---------------------------------------------------------------------------
+
+/// Signed fields for a fulfillment receipt: id, nonce, fulfilledAt. The
+/// giverPubKey and signature fields themselves are excluded from signing.
+Future<Map<String, Object?>> encodeReceipt(
+  Ticket ticket,
+  Identity identity, {
+  DateTime? fulfilledAt,
+}) async {
+  final signed = <String, Object?>{
+    'id': ticket.id,
+    'nonce': ticket.nonce,
+    'fulfilledAt': (fulfilledAt ?? DateTime.now()).toIso8601String(),
+  };
+  final signature = await identity.signHex(utf8.encode(canonicalJson(signed)));
+  return {
+    ...signed,
+    'giverPubKey': identity.publicKeyHex,
+    'signature': signature,
+  };
+}
+
+/// Verifies [receipt] against the local [ticket]: id and nonce must match,
+/// the giver key must be the ticket's signer, and the signature must check
+/// out over the canonical JSON of {id, nonce, fulfilledAt}.
+Future<bool> verifyReceipt(Map<dynamic, dynamic> receipt, Ticket ticket) async {
+  final id = receipt['id'];
+  final nonce = receipt['nonce'];
+  final fulfilledAt = receipt['fulfilledAt'];
+  final giverPubKey = receipt['giverPubKey'];
+  final signature = receipt['signature'];
+  if (id != ticket.id || nonce != ticket.nonce) return false;
+  if (fulfilledAt is! String || DateTime.tryParse(fulfilledAt) == null) {
+    return false;
+  }
+  if (!_isPubKey(giverPubKey) || signature is! String) return false;
+  if (ticket.isSigned && giverPubKey != ticket.giverPubKey) return false;
+  final signed = <String, Object?>{
+    'id': id,
+    'nonce': nonce,
+    'fulfilledAt': fulfilledAt,
+  };
+  return Identity.verify(
+    publicKeyHex: giverPubKey as String,
+    message: utf8.encode(canonicalJson(signed)),
+    signatureHex: signature,
   );
 }
 

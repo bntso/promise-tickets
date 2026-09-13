@@ -19,7 +19,13 @@ class ContactStore extends ChangeNotifier {
     return map == null ? null : Contact.fromMap(map);
   }
 
-  Future<Contact> add({required String name, required String publicKeyHex}) async {
+  Future<Contact> add({
+    required String name,
+    required String publicKeyHex,
+    ContactSource source = ContactSource.scanned,
+    String? username,
+    String? serverUid,
+  }) async {
     final trimmed = name.trim();
     if (trimmed.isEmpty) {
       throw const FormatException('Please enter a name.');
@@ -31,10 +37,25 @@ class ContactStore extends ChangeNotifier {
       name: trimmed,
       publicKeyHex: publicKeyHex,
       addedAt: DateTime.now(),
+      source: source,
+      username: username,
+      serverUid: serverUid,
     );
     await _box.put(publicKeyHex, contact.toMap());
     notifyListeners();
     return contact;
+  }
+
+  /// Upgrades a directory-sourced contact to "verified in person" once their
+  /// card has been scanned face-to-face.
+  Future<void> markScanned(String publicKeyHex) async {
+    final contact = byPubKey(publicKeyHex);
+    if (contact == null || contact.source == ContactSource.scanned) return;
+    await _box.put(
+      publicKeyHex,
+      contact.copyWith(source: ContactSource.scanned).toMap(),
+    );
+    notifyListeners();
   }
 
   Future<void> rename(String publicKeyHex, String newName) async {

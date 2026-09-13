@@ -6,6 +6,10 @@ enum TicketRole { giver, holder }
 
 enum TicketStatus { active, redeemed }
 
+/// Server-side state of a ticket sent through the directory (null for
+/// purely local/QR-only tickets).
+enum ServerTicketStatus { offered, claimRequested, fulfilled }
+
 class Ticket {
   Ticket({
     required this.id,
@@ -23,6 +27,8 @@ class Ticket {
     this.recipientName,
     this.recipientPubKey,
     this.signature,
+    this.serverStatus,
+    this.redeemedAt,
   });
 
   factory Ticket.create({
@@ -70,6 +76,12 @@ class Ticket {
       recipientName: map['recipientName'] as String?,
       recipientPubKey: map['recipientPubKey'] as String?,
       signature: map['signature'] as String?,
+      serverStatus: map['serverStatus'] is String
+          ? ServerTicketStatus.values.byName(map['serverStatus'] as String)
+          : null,
+      redeemedAt: map['redeemedAt'] is String
+          ? DateTime.tryParse(map['redeemedAt'] as String)
+          : null,
     );
   }
 
@@ -98,6 +110,14 @@ class Ticket {
   /// legacy PT1-era tickets.
   final String? signature;
 
+  /// Last known server-side status, for tickets sent through the directory;
+  /// null when the ticket only ever travelled by QR/link.
+  final ServerTicketStatus? serverStatus;
+
+  /// When the giver confirmed fulfillment (from the signed receipt); null
+  /// for tickets redeemed before v2 receipts existed.
+  final DateTime? redeemedAt;
+
   bool get isExpired => DateTime.now().isAfter(expiresAt);
 
   /// Signed and attributed to a key — whether that key is a known contact is
@@ -111,6 +131,8 @@ class Ticket {
     String? holderPubKey,
     String? recipientName,
     String? recipientPubKey,
+    ServerTicketStatus? serverStatus,
+    DateTime? redeemedAt,
   }) {
     return Ticket(
       id: id,
@@ -128,6 +150,8 @@ class Ticket {
       recipientName: recipientName ?? this.recipientName,
       recipientPubKey: recipientPubKey ?? this.recipientPubKey,
       signature: signature,
+      serverStatus: serverStatus ?? this.serverStatus,
+      redeemedAt: redeemedAt ?? this.redeemedAt,
     );
   }
 
@@ -148,6 +172,8 @@ class Ticket {
       'recipientName': recipientName,
       'recipientPubKey': recipientPubKey,
       'signature': signature,
+      'serverStatus': serverStatus?.name,
+      'redeemedAt': redeemedAt?.toIso8601String(),
     };
   }
 

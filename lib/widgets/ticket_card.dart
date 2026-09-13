@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 
 import '../models/ticket.dart';
 import '../people/contact_store.dart';
@@ -11,6 +12,7 @@ class TicketCard extends StatelessWidget {
     required this.ticket,
     this.counterpartyLabel,
     this.verified,
+    this.onConfirmClaim,
     this.onTap,
   });
 
@@ -19,6 +21,9 @@ class TicketCard extends StatelessWidget {
 
   /// true → ✓ verified, false → unverified, null → no badge.
   final bool? verified;
+
+  /// Set when the giver can confirm a server claim from this card.
+  final VoidCallback? onConfirmClaim;
   final VoidCallback? onTap;
 
   /// Computes the counterparty label and badge for [ticket] as seen on this
@@ -54,6 +59,47 @@ class TicketCard extends StatelessWidget {
     return 'Expires in $days days';
   }
 
+  /// Server-sync chip: giver sees Sent / Claim requested / Fulfilled;
+  /// holder sees In wallet / Waiting confirmation / Fulfilled.
+  Widget? _statusChip(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    if (ticket.status == TicketStatus.redeemed) {
+      final at = ticket.redeemedAt;
+      if (at == null) return null;
+      return Chip(
+        visualDensity: VisualDensity.compact,
+        avatar: const Icon(Icons.check_circle_outline, size: 16),
+        label: Text('Fulfilled ${DateFormat.yMMMd().format(at)}'),
+      );
+    }
+    final giver = ticket.role == TicketRole.giver;
+    switch (ticket.serverStatus) {
+      case ServerTicketStatus.offered:
+        return Chip(
+          visualDensity: VisualDensity.compact,
+          label: Text(giver ? 'Sent' : 'In wallet'),
+        );
+      case ServerTicketStatus.claimRequested:
+        if (giver) {
+          return ActionChip(
+            visualDensity: VisualDensity.compact,
+            backgroundColor: colorScheme.primaryContainer,
+            avatar: const Icon(Icons.front_hand_outlined, size: 16),
+            label: const Text('Claim requested'),
+            onPressed: onConfirmClaim,
+          );
+        }
+        return Chip(
+          visualDensity: VisualDensity.compact,
+          backgroundColor: colorScheme.tertiaryContainer,
+          label: const Text('Waiting confirmation'),
+        );
+      case ServerTicketStatus.fulfilled:
+      case null:
+        return null;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
@@ -68,6 +114,8 @@ class TicketCard extends StatelessWidget {
                   ? colorScheme.error
                   : null,
         );
+
+    final statusChip = _statusChip(context);
 
     return Opacity(
       opacity: expired ? 0.5 : 1,
@@ -101,6 +149,8 @@ class TicketCard extends StatelessWidget {
                   ],
                 ),
               Text(_expiryLabel(), style: subtitleStyle),
+              if (statusChip != null)
+                Align(alignment: Alignment.centerLeft, child: statusChip),
             ],
           ),
           trailing: ticket.status == TicketStatus.redeemed

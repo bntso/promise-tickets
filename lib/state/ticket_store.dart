@@ -89,6 +89,36 @@ class TicketStore extends ChangeNotifier {
     String? holderPubKey,
   }) async {
     final ticket = await decodeAnyGift(payload);
+    return _import(
+      ticket,
+      holderName: holderName,
+      holderPubKey: holderPubKey,
+    );
+  }
+
+  /// Imports a signed PT2 gift already in map form (server inbox flow) —
+  /// same verification as [importGift] on a PT2 QR payload.
+  Future<Ticket> importGiftMap(
+    Map<dynamic, dynamic> giftMap, {
+    String? holderName,
+    String? holderPubKey,
+    ServerTicketStatus? serverStatus,
+  }) async {
+    final ticket = await decodeGiftV2Map(giftMap);
+    return _import(
+      ticket,
+      holderName: holderName,
+      holderPubKey: holderPubKey,
+      serverStatus: serverStatus,
+    );
+  }
+
+  Future<Ticket> _import(
+    Ticket ticket, {
+    String? holderName,
+    String? holderPubKey,
+    ServerTicketStatus? serverStatus,
+  }) async {
     if (_box.containsKey(ticket.id)) {
       throw const FormatException('You already have this ticket.');
     }
@@ -96,6 +126,7 @@ class TicketStore extends ChangeNotifier {
       role: TicketRole.holder,
       holderName: holderName,
       holderPubKey: holderPubKey,
+      serverStatus: serverStatus,
     );
     await _box.put(held.id, held.toMap());
     notifyListeners();
@@ -108,6 +139,36 @@ class TicketStore extends ChangeNotifier {
       throw const FormatException('This ticket is not on this device.');
     }
     await _box.put(id, ticket.copyWith(status: TicketStatus.redeemed).toMap());
+    notifyListeners();
+  }
+
+  /// Records the server-side status on the local copy (reconciliation).
+  Future<void> markServerStatus(String id, ServerTicketStatus status) async {
+    final ticket = byId(id);
+    if (ticket == null || ticket.serverStatus == status) return;
+    await _box.put(id, ticket.copyWith(serverStatus: status).toMap());
+    notifyListeners();
+  }
+
+  /// Applies a verified server fulfillment: redeemed, with the receipt's
+  /// fulfillment date.
+  Future<void> markFulfilled(String id, DateTime fulfilledAt) async {
+    final ticket = byId(id);
+    if (ticket == null) return;
+    if (ticket.status == TicketStatus.redeemed &&
+        ticket.redeemedAt == fulfilledAt) {
+      return;
+    }
+    await _box.put(
+      id,
+      ticket
+          .copyWith(
+            status: TicketStatus.redeemed,
+            serverStatus: ServerTicketStatus.fulfilled,
+            redeemedAt: fulfilledAt,
+          )
+          .toMap(),
+    );
     notifyListeners();
   }
 

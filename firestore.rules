@@ -1,0 +1,70 @@
+rules_version = '2';
+
+// Promise Tickets — the server is an untrusted relay + directory.
+// Payloads are Ed25519-signed by clients; these rules only enforce
+// ownership and the status state machine, never content validity
+// (clients verify signatures themselves).
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function authed() {
+      return request.auth != null;
+    }
+
+    // Directory: username -> displayName + public key.
+    match /users/{username} {
+      allow read: if authed();
+      allow create: if authed()
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.keys().hasOnly(
+            ['displayName', 'publicKey', 'uid', 'createdAt'])
+        && request.resource.data.displayName is string
+        && request.resource.data.publicKey is string;
+      allow update: if authed()
+        && resource.data.uid == request.auth.uid
+        && !request.resource.data.diff(resource.data).affectedKeys()
+            .hasAny(['uid', 'publicKey', 'createdAt']);
+      allow delete: if false;
+    }
+
+    // Signed gift payloads with a status state machine:
+    // offered -> claimRequested (by recipient) -> fulfilled (by giver)
+    // offered -> fulfilled (by giver, in-person QR shortcut)
+    match /tickets/{ticketId} {
+      allow read: if authed()
+        && (resource.data.fromUid == request.auth.uid
+            || resource.data.toUid == request.auth.uid);
+
+      allow create: if authed()
+        && request.resource.data.fromUid == request.auth.uid
+        && request.resource.data.toUid is string
+        && request.resource.data.toUsername is string
+        && request.resource.data.status == 'offered'
+        && request.resource.data.gift is map
+        && request.resource.data.keys().hasOnly(
+            ['gift', 'fromUid', 'fromUsername', 'fromPubKey',
+             'toUid', 'toUsername', 'status', 'createdAt', 'expiresAt']);
+
+      allow update: if authed() && (
+        // Recipient requests their claim.
+        (request.auth.uid == resource.data.toUid
+          && resource.data.status == 'offered'
+          && request.resource.data.status == 'claimRequested'
+          && !request.resource.data.diff(resource.data).affectedKeys()
+              .hasAny(['gift', 'fromUid', 'fromUsername', 'fromPubKey',
+                       'toUid', 'toUsername', 'createdAt', 'expiresAt']))
+        ||
+        // Only the giver can mark fulfilled and attach the signed receipt.
+        (request.auth.uid == resource.data.fromUid
+          && resource.data.status in ['offered', 'claimRequested']
+          && request.resource.data.status == 'fulfilled'
+          && request.resource.data.receipt is map
+          && !request.resource.data.diff(resource.data).affectedKeys()
+              .hasAny(['gift', 'fromUid', 'fromUsername', 'fromPubKey',
+                       'toUid', 'toUsername', 'createdAt', 'expiresAt']))
+      );
+
+      allow delete: if false;
+    }
+  }
+}

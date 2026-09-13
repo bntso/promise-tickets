@@ -5,9 +5,12 @@ import 'package:provider/provider.dart';
 
 import '../identity/identity.dart';
 import '../models/ticket.dart';
+import '../people/contact.dart';
 import '../people/contact_store.dart';
 import '../qr/payload.dart';
+import '../server/server_service.dart';
 import '../state/ticket_store.dart';
+import '../widgets/import_preview.dart';
 
 class ScanScreen extends StatefulWidget {
   const ScanScreen({super.key});
@@ -74,6 +77,19 @@ class _ScanScreenState extends State<ScanScreen> {
       return;
     }
 
+    final existing = contacts.byPubKey(card.publicKeyHex);
+    if (existing != null && existing.source == ContactSource.directory) {
+      // Directory keys could lie; a face-to-face scan upgrades the contact
+      // to "verified in person".
+      await contacts.markScanned(card.publicKeyHex);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('${existing.name} is now verified in person.')),
+      );
+      Navigator.of(context).pop();
+      return;
+    }
+
     final added = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -118,7 +134,7 @@ class _ScanScreenState extends State<ScanScreen> {
     }
     if (!mounted) return;
 
-    final accepted = await _showImportPreview(ticket, contacts);
+    final accepted = await showImportPreview(context, ticket, contacts);
     if (!mounted || accepted != true) return;
 
     try {
@@ -137,81 +153,11 @@ class _ScanScreenState extends State<ScanScreen> {
     }
   }
 
-  /// Import preview: "From: name ✓ verified" for known signers,
-  /// "From: self-claimed name — unverified" with an add-contact offer
-  /// otherwise.
-  Future<bool?> _showImportPreview(Ticket ticket, ContactStore contacts) {
-    return showDialog<bool>(
-      context: context,
-      builder: (context) {
-        var known =
-            ticket.isSigned && contacts.byPubKey(ticket.giverPubKey!) != null;
-        return StatefulBuilder(
-          builder: (context, setState) {
-            final fromName = known
-                ? contacts.byPubKey(ticket.giverPubKey!)!.name
-                : ticket.giverName;
-            return AlertDialog(
-              title: const Text('Accept this promise?'),
-              content: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Flexible(child: Text('From: $fromName')),
-                      const SizedBox(width: 4),
-                      if (known)
-                        Icon(
-                          Icons.verified,
-                          size: 18,
-                          color: Theme.of(context).colorScheme.primary,
-                        ),
-                    ],
-                  ),
-                  Text(
-                    known ? 'verified' : 'unverified',
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
-                  const SizedBox(height: 12),
-                  Text('“${ticket.title}”'),
-                  if (ticket.note != null) ...[
-                    const SizedBox(height: 4),
-                    Text(ticket.note!),
-                  ],
-                ],
-              ),
-              actions: [
-                if (!known && ticket.isSigned)
-                  TextButton(
-                    onPressed: () async {
-                      await contacts.add(
-                        name: ticket.giverName,
-                        publicKeyHex: ticket.giverPubKey!,
-                      );
-                      setState(() => known = true);
-                    },
-                    child: const Text('Add to contacts'),
-                  ),
-                TextButton(
-                  onPressed: () => Navigator.of(context).pop(false),
-                  child: const Text('No thanks'),
-                ),
-                FilledButton(
-                  onPressed: () => Navigator.of(context).pop(true),
-                  child: const Text('Accept'),
-                ),
-              ],
-            );
-          },
-        );
-      },
-    );
-  }
-
   Future<void> _handleRedeem(String raw) async {
     final store = context.read<TicketStore>();
     final contacts = context.read<ContactStore>();
+    final server = context.read<ServerService>();
+    final identity = context.read<Identity>();
     final RedeemPayload payload;
     try {
       payload = await decodeAnyRedeem(raw);
@@ -265,6 +211,9 @@ class _ScanScreenState extends State<ScanScreen> {
 
     if (confirmed == true) {
       await store.redeem(ticket.id);
+      // In-person shortcut: if this ticket was also sent via the server,
+      // write fulfilled + signed receipt to its doc so both wallets sync.
+      await server.fulfillIfExists(ticket, identity);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Promise marked as fulfilled.')),
