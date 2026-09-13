@@ -3,7 +3,9 @@ import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 
 import '../models/ticket.dart';
+import '../people/contact_store.dart';
 import '../state/ticket_store.dart';
+import '../widgets/ticket_card.dart';
 import 'claim_screen.dart';
 import 'gift_qr_screen.dart';
 
@@ -40,6 +42,7 @@ class TicketDetailScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final store = context.watch<TicketStore>();
+    final contacts = context.watch<ContactStore>();
     final ticket = store.byId(ticketId);
     if (ticket == null) {
       return Scaffold(
@@ -49,6 +52,7 @@ class TicketDetailScreen extends StatelessWidget {
     }
 
     final active = ticket.status == TicketStatus.active && !ticket.isExpired;
+    final counterparty = TicketCard.counterpartyOf(ticket, contacts);
     final colorScheme = Theme.of(context).colorScheme;
 
     return Scaffold(
@@ -68,7 +72,27 @@ class TicketDetailScreen extends StatelessWidget {
                     style: Theme.of(context).textTheme.headlineSmall,
                   ),
                   const SizedBox(height: 8),
-                  Text('Promised by ${ticket.giverName}'),
+                  Row(
+                    children: [
+                      Flexible(child: Text(counterparty.label)),
+                      if (counterparty.verified != null) ...[
+                        const SizedBox(width: 4),
+                        Icon(
+                          counterparty.verified!
+                              ? Icons.verified
+                              : Icons.shield_outlined,
+                          size: 18,
+                          color: counterparty.verified!
+                              ? colorScheme.primary
+                              : colorScheme.outline,
+                        ),
+                        Text(
+                          counterparty.verified! ? ' verified' : ' unverified',
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                      ],
+                    ],
+                  ),
                   if (ticket.note != null) ...[
                     const SizedBox(height: 8),
                     Text(ticket.note!),

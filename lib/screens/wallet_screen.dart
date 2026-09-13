@@ -2,10 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../models/ticket.dart';
+import '../people/contact_store.dart';
 import '../state/ticket_store.dart';
 import '../widgets/ticket_card.dart';
 import 'create_ticket_screen.dart';
-import 'profile_screen.dart';
 import 'scan_screen.dart';
 import 'ticket_detail_screen.dart';
 
@@ -27,36 +27,32 @@ class WalletScreen extends StatelessWidget {
                 MaterialPageRoute<void>(builder: (_) => const ScanScreen()),
               ),
             ),
-            IconButton(
-              icon: const Icon(Icons.person),
-              tooltip: 'Your profile',
-              onPressed: () => Navigator.of(context).push(
-                MaterialPageRoute<void>(builder: (_) => const ProfileScreen()),
-              ),
-            ),
           ],
           bottom: const TabBar(
             tabs: [
-              Tab(text: 'Active'),
-              Tab(text: 'Redeemed'),
-              Tab(text: 'Expired'),
+              Tab(text: 'Owed to me'),
+              Tab(text: 'I owe'),
+              Tab(text: 'History'),
             ],
           ),
         ),
-        body: Consumer<TicketStore>(
-          builder: (context, store, _) => TabBarView(
+        body: Consumer2<TicketStore, ContactStore>(
+          builder: (context, store, contacts, _) => TabBarView(
             children: [
               _TicketList(
-                tickets: store.active,
-                emptyMessage: 'No promises yet — create one!',
+                tickets: store.owedToMe,
+                contacts: contacts,
+                emptyMessage: 'No promises owed to you yet — scan one!',
               ),
               _TicketList(
-                tickets: store.redeemed,
-                emptyMessage: 'Nothing redeemed yet.',
+                tickets: store.iOwe,
+                contacts: contacts,
+                emptyMessage: 'You owe nothing — create a promise!',
               ),
               _TicketList(
-                tickets: store.expired,
-                emptyMessage: 'No expired tickets.',
+                tickets: store.history,
+                contacts: contacts,
+                emptyMessage: 'No past promises.',
               ),
             ],
           ),
@@ -74,9 +70,14 @@ class WalletScreen extends StatelessWidget {
 }
 
 class _TicketList extends StatelessWidget {
-  const _TicketList({required this.tickets, required this.emptyMessage});
+  const _TicketList({
+    required this.tickets,
+    required this.contacts,
+    required this.emptyMessage,
+  });
 
   final List<Ticket> tickets;
+  final ContactStore contacts;
   final String emptyMessage;
 
   @override
@@ -89,8 +90,11 @@ class _TicketList extends StatelessWidget {
       itemCount: tickets.length,
       itemBuilder: (context, index) {
         final ticket = tickets[index];
+        final counterparty = TicketCard.counterpartyOf(ticket, contacts);
         return TicketCard(
           ticket: ticket,
+          counterpartyLabel: counterparty.label,
+          verified: counterparty.verified,
           onTap: () => Navigator.of(context).push(
             MaterialPageRoute<void>(
               builder: (_) => TicketDetailScreen(ticketId: ticket.id),

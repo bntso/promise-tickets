@@ -45,7 +45,7 @@ void main() {
     });
 
     test('rejects unknown payload types and wrong prefixes', () {
-      expect(payloadTypeOf('PT2:GIFT:abc'), isNull);
+      expect(payloadTypeOf('PT3:GIFT:abc'), isNull);
       expect(payloadTypeOf('hello world'), isNull);
       expect(
         () => decodeGift('PT2:GIFT:abc'),

@@ -2,6 +2,8 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hive/hive.dart';
+import 'package:promise_tickets/identity/identity.dart';
+import 'package:promise_tickets/identity/key_store.dart';
 import 'package:promise_tickets/models/ticket.dart';
 import 'package:promise_tickets/qr/payload.dart';
 import 'package:promise_tickets/state/ticket_store.dart';
@@ -93,5 +95,108 @@ void main() {
     await store.delete(ticket.id);
     expect(store.byId(ticket.id), isNull);
     expect(store.tickets, isEmpty);
+  });
+
+  group('v2', () {
+    test('directional getters split by role and status', () async {
+      final store = await newStore();
+      final identity = await Identity.load(MemoryKeyStore(), name: 'Me');
+
+      // Giver copy → "I owe".
+      final mine = await store.create(
+        title: 'My promise',
+        giverName: 'Me',
+        giverPubKey: identity.publicKeyHex,
+      );
+      // Imported holder copy → "Owed to me".
+      final otherStore = await newStore();
+      final theirs = await otherStore.create(title: 'Theirs', giverName: 'Ana');
+      final held = await store.importGift(
+        encodeGift(theirs),
+        holderName: identity.name,
+        holderPubKey: identity.publicKeyHex,
+      );
+
+      expect(store.iOwe.map((t) => t.id), [mine.id]);
+      expect(store.owedToMe.map((t) => t.id), [held.id]);
+      expect(store.history, isEmpty);
+
+      await store.redeem(mine.id);
+      expect(store.iOwe, isEmpty);
+      expect(store.history.map((t) => t.id), [mine.id]);
+    });
+
+    test('import stamps the holder counterparty fields', () async {
+      final holder = await Identity.load(MemoryKeyStore(), name: 'Ana');
+      final giver = await Identity.load(MemoryKeyStore(), name: 'Ricardo');
+
+      final giverStore = await newStore();
+      final ticket = await giverStore.create(
+        title: 'Walk the dog',
+        giverName: giver.name,
+        giverPubKey: giver.publicKeyHex,
+      );
+      final raw = await encodeGiftV2(ticket, giver);
+
+      final holderStore = await newStore();
+      final held = await holderStore.importGift(
+        raw,
+        holderName: holder.name,
+        holderPubKey: holder.publicKeyHex,
+      );
+
+      expect(held.holderName, 'Ana');
+      expect(held.holderPubKey, holder.publicKeyHex);
+      expect(held.giverPubKey, giver.publicKeyHex);
+      expect(held.isSigned, isTrue);
+    });
+
+    test('attachRecipient records who the gift is for', () async {
+      final store = await newStore();
+      final ticket = await store.create(title: 'T', giverName: 'Me');
+      final updated = await store.attachRecipient(
+        ticket.id,
+        recipientName: 'Ana',
+        recipientPubKey: 'ab' * 32,
+      );
+
+      expect(updated!.recipientName, 'Ana');
+      expect(store.byId(ticket.id)!.recipientPubKey, 'ab' * 32);
+    });
+
+    test('migration: PT1-era tickets without new fields still load', () async {
+      final box = await Hive.openBox<Map>('tickets_${boxCounter++}');
+      // A map as written by v1: no giverPubKey/holder/signature fields.
+      await box.put('old-1', {
+        'id': 'old-1',
+        'title': 'Old promise',
+        'note': null,
+        'giverName': 'Me',
+        'createdAt': DateTime(2026, 1, 1).toIso8601String(),
+        'expiresAt': DateTime(2027, 1, 1).toIso8601String(),
+        'status': 'active',
+        'nonce': 'f' * 32,
+        'role': 'giver',
+      });
+
+      final store = TicketStore(box);
+      final loaded = store.byId('old-1');
+      expect(loaded, isNotNull);
+      expect(loaded!.isSigned, isFalse);
+      expect(store.iOwe.single.id, 'old-1');
+    });
+
+    test('migration: identity is generated and seeded with the profile name',
+        () async {
+      final keyStore = MemoryKeyStore();
+      final identity = await Identity.load(keyStore, name: 'Ricardo');
+      expect(identity.name, 'Ricardo');
+      expect(identity.publicKeyHex, hasLength(64));
+      // Persisted: a second load reuses the same key.
+      expect(
+        (await Identity.load(keyStore, name: 'Ricardo')).publicKeyHex,
+        identity.publicKeyHex,
+      );
+    });
   });
 }

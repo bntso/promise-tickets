@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
-import 'package:hive/hive.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 
-import '../state/profile.dart';
+import '../identity/identity.dart';
+import '../people/contact.dart';
+import '../people/contact_store.dart';
 import '../state/ticket_store.dart';
 import 'gift_qr_screen.dart';
 
@@ -46,16 +47,51 @@ class _CreateTicketScreenState extends State<CreateTicketScreen> {
       return;
     }
     final store = context.read<TicketStore>();
-    final giverName = profileName(context.read<Box>());
-    final ticket = await store.create(
+    final identity = context.read<Identity>();
+    var ticket = await store.create(
       title: _titleController.text,
       note: _noteController.text,
-      giverName: giverName,
+      giverName: identity.name,
       expiresAt: _expiresAt,
+      giverPubKey: identity.publicKeyHex,
     );
+    if (!mounted) return;
+
+    final contact = await _pickRecipient();
+    if (contact != null) {
+      ticket = (await store.attachRecipient(
+        ticket.id,
+        recipientName: contact.name,
+        recipientPubKey: contact.publicKeyHex,
+      ))!;
+    }
     if (!mounted) return;
     Navigator.of(context).pushReplacement(
       MaterialPageRoute<void>(builder: (_) => GiftQrScreen(ticket: ticket)),
+    );
+  }
+
+  /// Optional "Who is this for?" picker — skipping leaves the gift open to
+  /// whoever scans it.
+  Future<Contact?> _pickRecipient() {
+    final contacts = context.read<ContactStore>().contacts;
+    if (contacts.isEmpty) return Future.value();
+    return showDialog<Contact?>(
+      context: context,
+      builder: (context) => SimpleDialog(
+        title: const Text('Who is this for?'),
+        children: [
+          for (final contact in contacts)
+            SimpleDialogOption(
+              onPressed: () => Navigator.of(context).pop(contact),
+              child: Text(contact.name),
+            ),
+          SimpleDialogOption(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Skip — I’ll decide when I gift it'),
+          ),
+        ],
+      ),
     );
   }
 
