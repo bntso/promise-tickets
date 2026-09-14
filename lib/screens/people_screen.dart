@@ -5,65 +5,13 @@ import '../identity/identity.dart';
 import '../people/contact.dart';
 import '../people/contact_store.dart';
 import '../server/server_service.dart';
+import '../widgets/contact_actions.dart';
+import 'person_screen.dart';
 import 'registration_screen.dart';
 import 'scan_screen.dart';
 
 class PeopleScreen extends StatelessWidget {
   const PeopleScreen({super.key});
-
-  Future<void> _renameContact(BuildContext context, Contact contact) async {
-    final store = context.read<ContactStore>();
-    final controller = TextEditingController(text: contact.name);
-    final newName = await showDialog<String>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Rename contact'),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          textCapitalization: TextCapitalization.words,
-          decoration: const InputDecoration(labelText: 'Name'),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(controller.text),
-            child: const Text('Save'),
-          ),
-        ],
-      ),
-    );
-    if (newName != null) {
-      await store.rename(contact.publicKeyHex, newName);
-    }
-  }
-
-  Future<void> _deleteContact(BuildContext context, Contact contact) async {
-    final store = context.read<ContactStore>();
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text('Remove ${contact.name}?'),
-        content: const Text('Their future promises will show as unverified.'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('Remove'),
-          ),
-        ],
-      ),
-    );
-    if (confirmed == true) {
-      await store.delete(contact.publicKeyHex);
-    }
-  }
 
   Future<void> _searchDirectory(BuildContext context) async {
     final server = context.read<ServerService>();
@@ -150,8 +98,14 @@ class PeopleScreen extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text('Key: ${fingerprintOf(contact.publicKeyHex)}'),
-                      _SourceBadge(contact: contact),
+                      ContactSourceBadge(contact: contact),
                     ],
+                  ),
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) =>
+                          PersonScreen(publicKeyHex: contact.publicKeyHex),
+                    ),
                   ),
                   trailing: Row(
                     mainAxisSize: MainAxisSize.min,
@@ -159,12 +113,12 @@ class PeopleScreen extends StatelessWidget {
                       IconButton(
                         icon: const Icon(Icons.edit_outlined),
                         tooltip: 'Rename',
-                        onPressed: () => _renameContact(context, contact),
+                        onPressed: () => renameContact(context, contact),
                       ),
                       IconButton(
                         icon: const Icon(Icons.delete_outline),
                         tooltip: 'Remove',
-                        onPressed: () => _deleteContact(context, contact),
+                        onPressed: () => deleteContact(context, contact),
                       ),
                     ],
                   ),
@@ -174,37 +128,6 @@ class PeopleScreen extends StatelessWidget {
           );
         },
       ),
-    );
-  }
-}
-
-/// Trust badge: scanned keys were verified face-to-face; directory keys
-/// come from the untrusted server and are shown as less trusted.
-class _SourceBadge extends StatelessWidget {
-  const _SourceBadge({required this.contact});
-
-  final Contact contact;
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    final scanned = contact.source == ContactSource.scanned;
-    return Row(
-      children: [
-        Icon(
-          scanned ? Icons.verified : Icons.cloud_outlined,
-          size: 14,
-          color: scanned ? colorScheme.primary : colorScheme.outline,
-        ),
-        const SizedBox(width: 4),
-        Text(
-          scanned ? 'verified in person' : 'from directory',
-          style: Theme.of(context)
-              .textTheme
-              .bodySmall
-              ?.copyWith(color: scanned ? null : colorScheme.outline),
-        ),
-      ],
     );
   }
 }

@@ -9,8 +9,10 @@ import 'package:promise_tickets/identity/identity.dart';
 import 'package:promise_tickets/identity/key_store.dart';
 import 'package:promise_tickets/main.dart';
 import 'package:promise_tickets/models/ticket.dart';
+import 'package:promise_tickets/people/contact.dart';
 import 'package:promise_tickets/qr/payload.dart';
 import 'package:promise_tickets/server/server_service.dart';
+import 'package:promise_tickets/state/profile.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -127,6 +129,119 @@ void main() {
       expect(find.text('Inbox (1)'), findsOneWidget);
       expect(find.text('Do the dishes'), findsOneWidget);
       expect(find.text('From: @ana'), findsOneWidget);
+    });
+  });
+
+  group('wallet view toggle', () {
+    testWidgets('switches between cards and list and persists', (tester) async {
+      await tester.pumpWidget(app(ServerService.offline(settings: settingsBox)));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+
+      // Default is cards; the button offers the list view. The toggle
+      // writes to Hive, so the taps run in a real-async zone.
+      expect(find.byTooltip('Show list view'), findsOneWidget);
+      await tester.runAsync(() async {
+        await tester.tap(find.byTooltip('Show list view'));
+      });
+      await tester.pump();
+
+      expect(settingsBox.get(kWalletViewKey), 'list');
+      expect(find.byTooltip('Show card view'), findsOneWidget);
+
+      await tester.runAsync(() async {
+        await tester.tap(find.byTooltip('Show card view'));
+      });
+      await tester.pump();
+      expect(settingsBox.get(kWalletViewKey), 'cards');
+    });
+
+    group('with list view saved', () {
+      setUp(() async {
+        await settingsBox.put(kWalletViewKey, 'list');
+      });
+
+      testWidgets('saved preference is applied at startup', (tester) async {
+        await tester
+            .pumpWidget(app(ServerService.offline(settings: settingsBox)));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 100));
+
+        expect(find.byTooltip('Show card view'), findsOneWidget);
+      });
+    });
+  });
+
+  group('person detail', () {
+    late Identity ana;
+
+    setUp(() async {
+      ana = await Identity.load(MemoryKeyStore(), name: 'Ana');
+      final bo = await Identity.load(MemoryKeyStore(), name: 'Bo');
+      await contactsBox.put(
+        ana.publicKeyHex,
+        Contact(
+          name: 'Ana',
+          publicKeyHex: ana.publicKeyHex,
+          addedAt: DateTime(2026),
+        ).toMap(),
+      );
+      await contactsBox.put(
+        bo.publicKeyHex,
+        Contact(
+          name: 'Bo',
+          publicKeyHex: bo.publicKeyHex,
+          addedAt: DateTime(2026),
+        ).toMap(),
+      );
+      // A promise Ana gave me (they owe me) and one I addressed to her
+      // (I owe them).
+      final fromAna = Ticket.create(
+        title: 'Wash the car',
+        giverName: 'Ana',
+        role: TicketRole.holder,
+        giverPubKey: ana.publicKeyHex,
+      );
+      await ticketsBox.put(fromAna.id, fromAna.toMap());
+      final toAna = Ticket.create(
+        title: 'Walk the dog',
+        giverName: 'Me',
+        recipientName: 'Ana',
+        recipientPubKey: ana.publicKeyHex,
+      );
+      await ticketsBox.put(toAna.id, toAna.toMap());
+    });
+
+    Future<void> openPerson(WidgetTester tester, String name) async {
+      await tester.pumpWidget(app(ServerService.offline(settings: settingsBox)));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+      await tester.tap(find.byIcon(Icons.people));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+      await tester.tap(find.text(name));
+      await tester.pump();
+      // Let the push transition finish so the people list is offstage.
+      await tester.pump(const Duration(milliseconds: 500));
+    }
+
+    testWidgets('shows both directions of tickets for the contact',
+        (tester) async {
+      await openPerson(tester, 'Ana');
+
+      expect(find.text('They owe me'), findsOneWidget);
+      expect(find.text('I owe them'), findsOneWidget);
+      expect(find.text('Wash the car'), findsOneWidget);
+      expect(find.text('Walk the dog'), findsOneWidget);
+      expect(find.text('✓ verified in person'), findsOneWidget);
+    });
+
+    testWidgets('empty sections show a friendly line', (tester) async {
+      await openPerson(tester, 'Bo');
+
+      expect(find.text('They owe me'), findsOneWidget);
+      expect(find.text('I owe them'), findsOneWidget);
+      expect(find.text('No promises between you yet.'), findsNWidgets(2));
     });
   });
 }

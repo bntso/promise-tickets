@@ -45,6 +45,37 @@ class TicketStore extends ChangeNotifier {
     return map == null ? null : Ticket.fromMap(map);
   }
 
+  /// Tickets involving the contact with [publicKeyHex], in both directions:
+  /// [theyOweMe] are my holder tickets they gave me, [iOweThem] are my
+  /// giver tickets addressed to or held by them. Matching is by public key
+  /// only — keyless (v1/unaddressed) tickets never match. Each list is
+  /// active first, then history.
+  ({List<Ticket> theyOweMe, List<Ticket> iOweThem}) ticketsForContact(
+    String publicKeyHex,
+  ) {
+    bool isActive(Ticket t) =>
+        t.status == TicketStatus.active && !t.isExpired;
+    List<Ticket> activeFirst(Iterable<Ticket> source) {
+      final list = source.toList();
+      return [
+        ...list.where(isActive),
+        ...list.where((t) => !isActive(t)),
+      ];
+    }
+
+    return (
+      theyOweMe: activeFirst(tickets.where(
+        (t) => t.role == TicketRole.holder && t.giverPubKey == publicKeyHex,
+      )),
+      iOweThem: activeFirst(tickets.where(
+        (t) =>
+            t.role == TicketRole.giver &&
+            (t.recipientPubKey == publicKeyHex ||
+                t.holderPubKey == publicKeyHex),
+      )),
+    );
+  }
+
   Future<Ticket> create({
     required String title,
     String? note,

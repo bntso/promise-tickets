@@ -198,5 +198,56 @@ void main() {
         identity.publicKeyHex,
       );
     });
+
+    test('ticketsForContact matches by key in both directions, active first',
+        () async {
+      final store = await newStore();
+      final ana = await Identity.load(MemoryKeyStore(), name: 'Ana');
+      final keyless = 'cd' * 32;
+
+      // They owe me: a gift from Ana, imported through the gift path so it
+      // lands in the store as my holder copy.
+      final giverSide = await newStore();
+      final gifted = await giverSide.create(
+        title: 'Wash the car',
+        giverName: 'Ana',
+        giverPubKey: ana.publicKeyHex,
+      );
+      await store.importGift(
+        await encodeGiftV2(gifted, ana),
+        holderName: 'Me',
+      );
+
+      // I owe them: an active giver ticket addressed to Ana, plus a
+      // redeemed one — history must sort after active.
+      final owed = await store.create(title: 'Walk the dog', giverName: 'Me');
+      final addressed = (await store.attachRecipient(
+        owed.id,
+        recipientName: 'Ana',
+        recipientPubKey: ana.publicKeyHex,
+      ))!;
+      final past = await store.create(title: 'Old favor', giverName: 'Me');
+      final pastAddressed = (await store.attachRecipient(
+        past.id,
+        recipientName: 'Ana',
+        recipientPubKey: ana.publicKeyHex,
+      ))!;
+      await store.redeem(past.id);
+
+      // Keyless tickets (v1 / unaddressed) never match.
+      final unrelated = await store.create(title: 'Unrelated', giverName: 'Me');
+      await store.attachRecipient(
+        unrelated.id,
+        recipientName: 'Someone',
+        recipientPubKey: keyless,
+      );
+
+      final between = store.ticketsForContact(ana.publicKeyHex);
+      expect(between.theyOweMe.map((t) => t.title), ['Wash the car']);
+      expect(
+        between.iOweThem.map((t) => t.id),
+        [addressed.id, pastAddressed.id],
+      );
+    });
   });
 }
